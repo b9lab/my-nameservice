@@ -3,6 +3,26 @@ name = "my-nameservice"
 version = "0.1.0"
 edition = "2021"
 
+# Linkage options. More information: https://doc.rust-lang.org/reference/linkage.html
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# Use library feature to disable all instantiate/execute/query exports
+library = []
+
+# Optimizations in release builds. More information: https://doc.rust-lang.org/cargo/reference/profiles.html
+[profile.release]
+opt-level = "z"
+debug = false
+rpath = false
+lto = true
+debug-assertions = false
+codegen-units = 1
+panic = 'abort'
+incremental = false
+overflow-checks = true
+
 [dependencies]
 cosmwasm-schema = "2.1.3"
 cosmwasm-std = "2.1.3"
