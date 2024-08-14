@@ -1,5 +1,7 @@
-use crate::msg::InstantiateMsg;
-use cosmwasm_std::{entry_point, DepsMut, Env, MessageInfo, Response, StdError};
+use crate::{error::ContractError, msg::InstantiateMsg};
+use cosmwasm_std::{entry_point, DepsMut, Env, MessageInfo, Response};
+
+type ContractResult = Result<Response, ContractError>;
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
@@ -7,6 +9,6 @@ pub fn instantiate(
     _: Env,
     _: MessageInfo,
     _: InstantiateMsg,
-) -> Result<Response, StdError> {
+) -> ContractResult {
     Ok(Response::default())
 }
