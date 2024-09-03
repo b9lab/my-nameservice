@@ -1,4 +1,8 @@
-use crate::{error::ContractError, msg::InstantiateMsg};
+use crate::{
+    error::ContractError,
+    msg::{ExecuteMsg, InstantiateMsg},
+    state::{NameRecord, NAME_RESOLVER},
+};
 use cosmwasm_std::{entry_point, DepsMut, Env, MessageInfo, Response};
 
 type ContractResult = Result<Response, ContractError>;
@@ -13,9 +17,37 @@ pub fn instantiate(
     Ok(Response::default())
 }
 
+#[cfg_attr(not(feature = "library"), entry_point)]
+pub fn execute(
+    deps: DepsMut,
+    _: Env,
+    info: MessageInfo,
+    msg: ExecuteMsg,
+) -> ContractResult {
+    match msg {
+        ExecuteMsg::Register { name } => execute_register(deps, info, name),
+    }
+}
+
+fn execute_register(deps: DepsMut, info: MessageInfo, name: String) -> ContractResult {
+    let key = name.as_bytes();
+    let record = NameRecord { owner: info.sender };
+
+    if NAME_RESOLVER.has(deps.storage, key) {
+        return Err(ContractError::NameTaken { name });
+    }
+
+    NAME_RESOLVER.save(deps.storage, key, &record)?;
+
+    Ok(Response::default())
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::msg::InstantiateMsg;
+    use crate::{
+        msg::{ExecuteMsg, InstantiateMsg},
+        state::{NameRecord, NAME_RESOLVER},
+    };
     use cosmwasm_std::{testing, Addr, Response};
 
     #[test]
@@ -39,5 +71,32 @@ mod tests {
         // Assert
         assert!(contract_result.is_ok(), "Failed to instantiate");
         assert_eq!(contract_result.unwrap(), Response::default())
+    }
+
+    #[test]
+    fn test_execute() {
+        // Arrange
+        let mut mocked_deps_mut = testing::mock_dependencies();
+        let mocked_env = testing::mock_env();
+        let mocked_addr = Addr::unchecked("addr");
+        let mocked_msg_info = testing::message_info(&mocked_addr, &[]);
+        let name = "alice".to_owned();
+        let execute_msg = ExecuteMsg::Register { name: name.clone() };
+
+        // Act
+        let contract_result = super::execute(
+            mocked_deps_mut.as_mut(),
+            mocked_env,
+            mocked_msg_info,
+            execute_msg,
+        );
+
+        // Assert
+        assert!(contract_result.is_ok(), "Failed to register alice");
+        assert_eq!(contract_result.unwrap(), Response::default());
+        assert!(NAME_RESOLVER.has(mocked_deps_mut.as_ref().storage, name.as_bytes()));
+        let stored = NAME_RESOLVER.load(mocked_deps_mut.as_ref().storage, name.as_bytes());
+        assert!(stored.is_ok());
+        assert_eq!(stored.unwrap(), NameRecord { owner: mocked_addr });
     }
 }
