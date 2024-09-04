@@ -1,9 +1,11 @@
 use crate::{
     error::ContractError,
-    msg::{ExecuteMsg, InstantiateMsg},
+    msg::{ExecuteMsg, InstantiateMsg, QueryMsg, ResolveRecordResponse},
     state::{NameRecord, NAME_RESOLVER},
 };
-use cosmwasm_std::{entry_point, DepsMut, Env, MessageInfo, Response};
+use cosmwasm_std::{
+    entry_point, to_json_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult,
+};
 
 type ContractResult = Result<Response, ContractError>;
 
@@ -42,13 +44,32 @@ fn execute_register(deps: DepsMut, info: MessageInfo, name: String) -> ContractR
     Ok(Response::default())
 }
 
+#[cfg_attr(not(feature = "library"), entry_point)]
+pub fn query(deps: Deps, _: Env, msg: QueryMsg) -> StdResult<Binary> {
+    match msg {
+        QueryMsg::ResolveRecord { name } => query_resolve_record(deps, name),
+    }
+}
+
+fn query_resolve_record(deps: Deps, name: String) -> StdResult<Binary> {
+    let key = name.as_bytes();
+
+    let address = NAME_RESOLVER
+        .may_load(deps.storage, key)?
+        .map(|record| record.owner.to_string());
+
+    let resp = ResolveRecordResponse { address };
+
+    to_json_binary(&resp)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
-        msg::{ExecuteMsg, InstantiateMsg},
+        msg::{ExecuteMsg, InstantiateMsg, QueryMsg},
         state::{NameRecord, NAME_RESOLVER},
     };
-    use cosmwasm_std::{testing, Addr, Response};
+    use cosmwasm_std::{testing, Addr, Binary, Response};
 
     #[test]
     fn test_instantiate() {
@@ -98,5 +119,28 @@ mod tests {
         let stored = NAME_RESOLVER.load(mocked_deps_mut.as_ref().storage, name.as_bytes());
         assert!(stored.is_ok());
         assert_eq!(stored.unwrap(), NameRecord { owner: mocked_addr });
+    }
+
+    #[test]
+    fn test_query() {
+        // Arrange
+        let mut mocked_deps_mut = testing::mock_dependencies();
+        let mocked_env = testing::mock_env();
+        let name = "alice".to_owned();
+        let mocked_addr_value = "addr".to_owned();
+        let mocked_addr = Addr::unchecked(mocked_addr_value.clone());
+        let mocked_msg_info = testing::message_info(&mocked_addr, &[]);
+        let _ = super::execute_register(mocked_deps_mut.as_mut(), mocked_msg_info, name.clone())
+            .expect("Failed to register alice");
+        let query_msg = QueryMsg::ResolveRecord { name };
+
+        // Act
+        let query_result = super::query(mocked_deps_mut.as_ref(), mocked_env, query_msg);
+
+        // Assert
+        assert!(query_result.is_ok(), "Failed to query alice name");
+        let expected_response = format!(r#"{{"address":"{mocked_addr_value}"}}"#);
+        let expected = Binary::new(expected_response.as_bytes().to_vec());
+        assert_eq!(query_result.unwrap(), expected);
     }
 }
