@@ -1,4 +1,4 @@
-use cosmwasm_std::Addr;
+use cosmwasm_std::{Addr, Event};
 use cw_multi_test::{App, ContractWrapper, Executor};
 use my_nameservice::{
     contract::{execute, instantiate, query},
@@ -45,6 +45,12 @@ fn test_register() {
 
     // Assert
     assert!(result.is_ok(), "Failed to register alice");
+    let received_response = result.unwrap();
+    let expected_event = Event::new("wasm-name-register")
+        .add_attribute("name", name_alice.to_owned())
+        .add_attribute("owner", owner_addr_value.to_owned());
+    received_response.assert_event(&expected_event);
+    assert_eq!(received_response.data, None);
     let stored_addr_bytes = mock_app
         .contract_storage(&contract_addr)
         .get(format!("\0\rname_resolver{name_alice}").as_bytes())

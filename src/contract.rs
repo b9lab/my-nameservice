@@ -4,7 +4,8 @@ use crate::{
     state::{NameRecord, NAME_RESOLVER},
 };
 use cosmwasm_std::{
-    entry_point, to_json_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult,
+    entry_point, to_json_binary, Binary, Deps, DepsMut, Env, Event, MessageInfo, Response,
+    StdResult,
 };
 
 type ContractResult = Result<Response, ContractError>;
@@ -33,7 +34,9 @@ pub fn execute(
 
 fn execute_register(deps: DepsMut, info: MessageInfo, name: String) -> ContractResult {
     let key = name.as_bytes();
-    let record = NameRecord { owner: info.sender };
+    let record = NameRecord {
+        owner: info.sender.to_owned(),
+    };
 
     if NAME_RESOLVER.has(deps.storage, key) {
         return Err(ContractError::NameTaken { name });
@@ -41,7 +44,11 @@ fn execute_register(deps: DepsMut, info: MessageInfo, name: String) -> ContractR
 
     NAME_RESOLVER.save(deps.storage, key, &record)?;
 
-    Ok(Response::default())
+    let registration_event = Event::new("name-register")
+        .add_attribute("name", name)
+        .add_attribute("owner", info.sender);
+    let resp = Response::default().add_event(registration_event);
+    Ok(resp)
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -69,7 +76,7 @@ mod tests {
         msg::{ExecuteMsg, InstantiateMsg, QueryMsg},
         state::{NameRecord, NAME_RESOLVER},
     };
-    use cosmwasm_std::{testing, Addr, Binary, Response};
+    use cosmwasm_std::{testing, Addr, Binary, Event, Response};
 
     #[test]
     fn test_instantiate() {
@@ -114,7 +121,12 @@ mod tests {
 
         // Assert
         assert!(contract_result.is_ok(), "Failed to register alice");
-        assert_eq!(contract_result.unwrap(), Response::default());
+        let received_response = contract_result.unwrap();
+        let expected_event = Event::new("name-register")
+            .add_attribute("name", name.to_owned())
+            .add_attribute("owner", mocked_addr.to_string());
+        let expected_response = Response::default().add_event(expected_event);
+        assert_eq!(received_response, expected_response);
         assert!(NAME_RESOLVER.has(mocked_deps_mut.as_ref().storage, name.as_bytes()));
         let stored = NAME_RESOLVER.load(mocked_deps_mut.as_ref().storage, name.as_bytes());
         assert!(stored.is_ok());
