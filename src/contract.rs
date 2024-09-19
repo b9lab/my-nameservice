@@ -1,10 +1,10 @@
 use crate::{
     error::ContractError,
     msg::{ExecuteMsg, InstantiateMsg, QueryMsg, ResolveRecordResponse},
-    state::{NameRecord, NAME_RESOLVER},
+    state::{NameRecord, MINTER, NAME_RESOLVER},
 };
 use cosmwasm_std::{
-    entry_point, to_json_binary, Binary, Deps, DepsMut, Env, Event, MessageInfo, Response,
+    entry_point, to_json_binary, Addr, Binary, Deps, DepsMut, Env, Event, MessageInfo, Response,
     StdResult,
 };
 
@@ -12,11 +12,12 @@ type ContractResult = Result<Response, ContractError>;
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
-    _: DepsMut,
+    deps: DepsMut,
     _: Env,
     _: MessageInfo,
-    _: InstantiateMsg,
+    msg: InstantiateMsg,
 ) -> ContractResult {
+    let _ = MINTER.initialize_owner(deps.storage, deps.api, Some(msg.minter.as_str()))?;
     Ok(Response::default())
 }
 
@@ -28,14 +29,22 @@ pub fn execute(
     msg: ExecuteMsg,
 ) -> ContractResult {
     match msg {
-        ExecuteMsg::Register { name } => execute_register(deps, info, name),
+        ExecuteMsg::Register { name, owner } => execute_register(deps, info, name, &owner),
     }
 }
 
-fn execute_register(deps: DepsMut, info: MessageInfo, name: String) -> ContractResult {
+fn execute_register(
+    deps: DepsMut,
+    info: MessageInfo,
+    name: String,
+    owner: &Addr,
+) -> ContractResult {
+    MINTER
+        .assert_owner(deps.storage, &info.sender)
+        .map_err(ContractError::from_minter(&info.sender))?;
     let key = name.as_bytes();
     let record = NameRecord {
-        owner: info.sender.to_owned(),
+        owner: owner.to_owned(),
     };
 
     if NAME_RESOLVER.has(deps.storage, key) {
@@ -46,7 +55,7 @@ fn execute_register(deps: DepsMut, info: MessageInfo, name: String) -> ContractR
 
     let registration_event = Event::new("name-register")
         .add_attribute("name", name)
-        .add_attribute("owner", info.sender);
+        .add_attribute("owner", owner.to_string());
     let resp = Response::default().add_event(registration_event);
     Ok(resp)
 }
@@ -74,9 +83,9 @@ fn query_resolve_record(deps: Deps, name: String) -> StdResult<Binary> {
 mod tests {
     use crate::{
         msg::{ExecuteMsg, InstantiateMsg, QueryMsg},
-        state::{NameRecord, NAME_RESOLVER},
+        state::{NameRecord, MINTER, NAME_RESOLVER},
     };
-    use cosmwasm_std::{testing, Addr, Binary, Event, Response};
+    use cosmwasm_std::{testing, Addr, Api, Binary, CanonicalAddr, Event, Response};
 
     #[test]
     fn test_instantiate() {
@@ -85,8 +94,13 @@ mod tests {
         let mocked_env = testing::mock_env();
         let mocked_addr = Addr::unchecked("addr");
         let mocked_msg_info = testing::message_info(&mocked_addr, &[]);
-
-        let instantiate_msg = InstantiateMsg {};
+        let minter = mocked_deps_mut
+            .api
+            .addr_humanize(&CanonicalAddr::from("minter".as_bytes()))
+            .expect("Failed to create minter address");
+        let instantiate_msg = InstantiateMsg {
+            minter: minter.to_string(),
+        };
 
         // Act
         let contract_result = super::instantiate(
@@ -98,7 +112,10 @@ mod tests {
 
         // Assert
         assert!(contract_result.is_ok(), "Failed to instantiate");
-        assert_eq!(contract_result.unwrap(), Response::default())
+        assert_eq!(contract_result.unwrap(), Response::default());
+        assert!(MINTER
+            .assert_owner(&mocked_deps_mut.storage, &minter)
+            .is_ok());
     }
 
     #[test]
@@ -107,9 +124,26 @@ mod tests {
         let mut mocked_deps_mut = testing::mock_dependencies();
         let mocked_env = testing::mock_env();
         let mocked_addr = Addr::unchecked("addr");
-        let mocked_msg_info = testing::message_info(&mocked_addr, &[]);
+        let minter = mocked_deps_mut
+            .api
+            .addr_humanize(&CanonicalAddr::from("minter".as_bytes()))
+            .expect("Failed to create minter address");
+        let _ = super::instantiate(
+            mocked_deps_mut.as_mut(),
+            mocked_env.to_owned(),
+            testing::message_info(&mocked_addr, &[]),
+            InstantiateMsg {
+                minter: minter.to_string(),
+            },
+        )
+        .expect("Failed to instantiate");
+        let mocked_msg_info = testing::message_info(&minter, &[]);
         let name = "alice".to_owned();
-        let execute_msg = ExecuteMsg::Register { name: name.clone() };
+        let owner = Addr::unchecked("owner");
+        let execute_msg = ExecuteMsg::Register {
+            name: name.clone(),
+            owner: owner.to_owned(),
+        };
 
         // Act
         let contract_result = super::execute(
@@ -124,13 +158,13 @@ mod tests {
         let received_response = contract_result.unwrap();
         let expected_event = Event::new("name-register")
             .add_attribute("name", name.to_owned())
-            .add_attribute("owner", mocked_addr.to_string());
+            .add_attribute("owner", owner.to_string());
         let expected_response = Response::default().add_event(expected_event);
         assert_eq!(received_response, expected_response);
         assert!(NAME_RESOLVER.has(mocked_deps_mut.as_ref().storage, name.as_bytes()));
         let stored = NAME_RESOLVER.load(mocked_deps_mut.as_ref().storage, name.as_bytes());
         assert!(stored.is_ok());
-        assert_eq!(stored.unwrap(), NameRecord { owner: mocked_addr });
+        assert_eq!(stored.unwrap(), NameRecord { owner: owner });
     }
 
     #[test]
@@ -141,9 +175,27 @@ mod tests {
         let name = "alice".to_owned();
         let mocked_addr_value = "addr".to_owned();
         let mocked_addr = Addr::unchecked(mocked_addr_value.clone());
-        let mocked_msg_info = testing::message_info(&mocked_addr, &[]);
-        let _ = super::execute_register(mocked_deps_mut.as_mut(), mocked_msg_info, name.clone())
-            .expect("Failed to register alice");
+        let minter = mocked_deps_mut
+            .api
+            .addr_humanize(&CanonicalAddr::from("minter".as_bytes()))
+            .expect("Failed to create minter address");
+        let _ = super::instantiate(
+            mocked_deps_mut.as_mut(),
+            mocked_env.to_owned(),
+            testing::message_info(&mocked_addr, &[]),
+            InstantiateMsg {
+                minter: minter.to_string(),
+            },
+        )
+        .expect("Failed to instantiate");
+        let mocked_msg_info = testing::message_info(&minter, &[]);
+        let _ = super::execute_register(
+            mocked_deps_mut.as_mut(),
+            mocked_msg_info,
+            name.clone(),
+            &mocked_addr,
+        )
+        .expect("Failed to register alice");
         let query_msg = QueryMsg::ResolveRecord { name };
 
         // Act

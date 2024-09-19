@@ -1,11 +1,14 @@
 use cosmwasm_schema::{cw_serde, QueryResponses};
+use cosmwasm_std::Addr;
 
 #[cw_serde]
-pub struct InstantiateMsg {}
+pub struct InstantiateMsg {
+    pub minter: String,
+}
 
 #[cw_serde]
 pub enum ExecuteMsg {
-    Register { name: String },
+    Register { name: String, owner: Addr },
 }
 
 #[cw_serde]

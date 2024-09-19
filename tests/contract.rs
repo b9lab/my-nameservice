@@ -1,25 +1,35 @@
-use cosmwasm_std::{Addr, Event};
+use cosmwasm_std::{Addr, Api, CanonicalAddr, Event};
 use cw_multi_test::{App, ContractWrapper, Executor};
 use my_nameservice::{
     contract::{execute, instantiate, query},
     msg::{ExecuteMsg, InstantiateMsg, QueryMsg, ResolveRecordResponse},
 };
 
-fn instantiate_nameservice(mock_app: &mut App) -> (u64, Addr) {
+type ContractAddr = Addr;
+type MinterAddr = Addr;
+
+fn instantiate_nameservice(mock_app: &mut App) -> (u64, ContractAddr, MinterAddr) {
     let nameservice_code = Box::new(ContractWrapper::new(execute, instantiate, query));
     let nameservice_code_id = mock_app.store_code(nameservice_code);
+    let minter = mock_app
+        .api()
+        .addr_humanize(&CanonicalAddr::from("minter".as_bytes()))
+        .unwrap();
     return (
         nameservice_code_id,
         mock_app
             .instantiate_contract(
                 nameservice_code_id,
                 Addr::unchecked("deployer"),
-                &InstantiateMsg {},
+                &InstantiateMsg {
+                    minter: minter.to_string(),
+                },
                 &[],
                 "nameservice",
                 None,
             )
             .expect("Failed to instantiate nameservice"),
+        minter,
     );
 }
 
@@ -27,17 +37,18 @@ fn instantiate_nameservice(mock_app: &mut App) -> (u64, Addr) {
 fn test_register() {
     // Arrange
     let mut mock_app = App::default();
-    let (_, contract_addr) = instantiate_nameservice(&mut mock_app);
+    let (_, contract_addr, minter) = instantiate_nameservice(&mut mock_app);
     let owner_addr_value = "owner".to_owned();
     let owner_addr = Addr::unchecked(owner_addr_value.clone());
     let name_alice = "alice".to_owned();
     let register_msg = ExecuteMsg::Register {
         name: name_alice.to_owned(),
+        owner: owner_addr.to_owned(),
     };
 
     // Act
     let result = mock_app.execute_contract(
-        owner_addr.clone(),
+        minter,
         contract_addr.clone(),
         &register_msg,
         &[],
@@ -63,15 +74,16 @@ fn test_register() {
 fn test_query() {
     // Arrange
     let mut mock_app = App::default();
-    let (_, contract_addr) = instantiate_nameservice(&mut mock_app);
+    let (_, contract_addr, minter) = instantiate_nameservice(&mut mock_app);
     let owner_addr = Addr::unchecked("owner");
     let name_alice = "alice".to_owned();
     let register_msg = ExecuteMsg::Register {
         name: name_alice.to_owned(),
+        owner: owner_addr.to_owned(),
     };
     let _ = mock_app
         .execute_contract(
-            owner_addr.clone(),
+            minter,
             contract_addr.clone(),
             &register_msg,
             &[],
@@ -100,7 +112,7 @@ fn test_query() {
 fn test_query_empty() {
     // Arrange
     let mut mock_app = App::default();
-    let (_, contract_addr) = instantiate_nameservice(&mut mock_app);
+    let (_, contract_addr, _) = instantiate_nameservice(&mut mock_app);
     let name_alice = "alice".to_owned();
     let resolve_record_query_msg = QueryMsg::ResolveRecord {
         name: name_alice.to_owned(),
