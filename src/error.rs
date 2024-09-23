@@ -1,25 +1,11 @@
-use cosmwasm_std::{Addr, StdError};
-use cw_ownable::OwnershipError;
+use cosmwasm_std::StdError;
+use cw721::error::Cw721ContractError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum ContractError {
     #[error("{0}")]
     Std(#[from] StdError),
-    #[error("Name already taken ({name})")]
-    NameTaken { name: String },
-    #[error("Caller ({caller}) is not minter")]
-    Minter {
-        caller: String,
-        inner: OwnershipError,
-    },
-}
-
-impl ContractError {
-    pub fn from_minter<'a>(caller: &'a Addr) -> impl Fn(OwnershipError) -> ContractError + 'a {
-        move |inner: OwnershipError| ContractError::Minter {
-            caller: caller.to_string(),
-            inner,
-        }
-    }
+    #[error("{0}")]
+    Cw721(#[from] Cw721ContractError),
 }

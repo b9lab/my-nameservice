@@ -1,91 +1,64 @@
 use crate::{
     error::ContractError,
-    msg::{ExecuteMsg, InstantiateMsg, QueryMsg, ResolveRecordResponse},
-    state::{NameRecord, MINTER, NAME_RESOLVER},
+    msg::{ExecuteMsg, InstantiateMsg, QueryMsg},
 };
-use cosmwasm_std::{
-    entry_point, to_json_binary, Addr, Binary, Deps, DepsMut, Env, Event, MessageInfo, Response,
-    StdResult,
+use cosmwasm_std::{entry_point, Binary, Deps, DepsMut, Env, MessageInfo, Response};
+use cw721::{
+    extension::Cw721EmptyExtensions,
+    traits::{Cw721Execute, Cw721Query},
 };
 
 type ContractResult = Result<Response, ContractError>;
+type BinaryResult = Result<Binary, ContractError>;
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
     deps: DepsMut,
-    _: Env,
-    _: MessageInfo,
+    env: Env,
+    info: MessageInfo,
     msg: InstantiateMsg,
 ) -> ContractResult {
-    let _ = MINTER.initialize_owner(deps.storage, deps.api, Some(msg.minter.as_str()))?;
-    Ok(Response::default())
+    Ok(Cw721EmptyExtensions::default().instantiate(deps, &env, &info, msg)?)
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn execute(
     deps: DepsMut,
-    _: Env,
+    env: Env,
     info: MessageInfo,
     msg: ExecuteMsg,
 ) -> ContractResult {
-    match msg {
-        ExecuteMsg::Register { name, owner } => execute_register(deps, info, name, &owner),
-    }
-}
-
-fn execute_register(
-    deps: DepsMut,
-    info: MessageInfo,
-    name: String,
-    owner: &Addr,
-) -> ContractResult {
-    MINTER
-        .assert_owner(deps.storage, &info.sender)
-        .map_err(ContractError::from_minter(&info.sender))?;
-    let key = name.as_bytes();
-    let record = NameRecord {
-        owner: owner.to_owned(),
-    };
-
-    if NAME_RESOLVER.has(deps.storage, key) {
-        return Err(ContractError::NameTaken { name });
-    }
-
-    NAME_RESOLVER.save(deps.storage, key, &record)?;
-
-    let registration_event = Event::new("name-register")
-        .add_attribute("name", name)
-        .add_attribute("owner", owner.to_string());
-    let resp = Response::default().add_event(registration_event);
-    Ok(resp)
+    Ok(Cw721EmptyExtensions::default().execute(deps, &env, &info, msg)?)
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn query(deps: Deps, _: Env, msg: QueryMsg) -> StdResult<Binary> {
-    match msg {
-        QueryMsg::ResolveRecord { name } => query_resolve_record(deps, name),
-    }
-}
-
-fn query_resolve_record(deps: Deps, name: String) -> StdResult<Binary> {
-    let key = name.as_bytes();
-
-    let address = NAME_RESOLVER
-        .may_load(deps.storage, key)?
-        .map(|record| record.owner.to_string());
-
-    let resp = ResolveRecordResponse { address };
-
-    to_json_binary(&resp)
+pub fn query(
+    deps: Deps,
+    env: Env,
+    msg: QueryMsg,
+) -> BinaryResult {
+    Ok(Cw721EmptyExtensions::default().query(deps, &env, msg)?)
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        msg::{ExecuteMsg, InstantiateMsg, QueryMsg},
-        state::{NameRecord, MINTER, NAME_RESOLVER},
+    use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
+    use cosmwasm_std::{testing, Addr, Binary, Response};
+    use cw721::{
+        extension::Cw721EmptyExtensions,
+        state::{NftInfo, MINTER},
     };
-    use cosmwasm_std::{testing, Addr, Api, Binary, CanonicalAddr, Event, Response};
+
+    fn simple_instantiate_msg(minter: String) -> InstantiateMsg {
+        InstantiateMsg {
+            name: "my names".to_owned(),
+            symbol: "MYN".to_owned(),
+            creator: None,
+            minter: Some(minter.to_string()),
+            collection_info_extension: None,
+            withdraw_address: None,
+        }
+    }
 
     #[test]
     fn test_instantiate() {
@@ -93,14 +66,9 @@ mod tests {
         let mut mocked_deps_mut = testing::mock_dependencies();
         let mocked_env = testing::mock_env();
         let mocked_addr = Addr::unchecked("addr");
-        let mocked_msg_info = testing::message_info(&mocked_addr, &[]);
-        let minter = mocked_deps_mut
-            .api
-            .addr_humanize(&CanonicalAddr::from("minter".as_bytes()))
-            .expect("Failed to create minter address");
-        let instantiate_msg = InstantiateMsg {
-            minter: minter.to_string(),
-        };
+        let mocked_msg_info = testing::mock_info(&mocked_addr.to_string(), &[]);
+        let minter = Addr::unchecked("minter");
+        let instantiate_msg = simple_instantiate_msg(minter.to_string());
 
         // Act
         let contract_result = super::instantiate(
@@ -112,7 +80,12 @@ mod tests {
 
         // Assert
         assert!(contract_result.is_ok(), "Failed to instantiate");
-        assert_eq!(contract_result.unwrap(), Response::default());
+        assert_eq!(
+            contract_result.unwrap(),
+            Response::default()
+                .add_attribute("minter", "minter")
+                .add_attribute("creator", "addr")
+        );
         assert!(MINTER
             .assert_owner(&mocked_deps_mut.storage, &minter)
             .is_ok());
@@ -124,25 +97,22 @@ mod tests {
         let mut mocked_deps_mut = testing::mock_dependencies();
         let mocked_env = testing::mock_env();
         let mocked_addr = Addr::unchecked("addr");
-        let minter = mocked_deps_mut
-            .api
-            .addr_humanize(&CanonicalAddr::from("minter".as_bytes()))
-            .expect("Failed to create minter address");
+        let minter = Addr::unchecked("minter");
         let _ = super::instantiate(
             mocked_deps_mut.as_mut(),
             mocked_env.to_owned(),
-            testing::message_info(&mocked_addr, &[]),
-            InstantiateMsg {
-                minter: minter.to_string(),
-            },
+            testing::mock_info(&mocked_addr.to_string(), &[]),
+            simple_instantiate_msg(minter.to_string()),
         )
         .expect("Failed to instantiate");
-        let mocked_msg_info = testing::message_info(&minter, &[]);
+        let mocked_msg_info = testing::mock_info(&minter.to_string(), &[]);
         let name = "alice".to_owned();
         let owner = Addr::unchecked("owner");
-        let execute_msg = ExecuteMsg::Register {
-            name: name.clone(),
-            owner: owner.to_owned(),
+        let execute_msg = ExecuteMsg::Mint {
+            token_id: name.to_owned(),
+            owner: owner.to_string(),
+            token_uri: None,
+            extension: None,
         };
 
         // Act
@@ -156,15 +126,30 @@ mod tests {
         // Assert
         assert!(contract_result.is_ok(), "Failed to register alice");
         let received_response = contract_result.unwrap();
-        let expected_event = Event::new("name-register")
-            .add_attribute("name", name.to_owned())
-            .add_attribute("owner", owner.to_string());
-        let expected_response = Response::default().add_event(expected_event);
+        let expected_response = Response::default()
+            .add_attribute("action", "mint")
+            .add_attribute("minter", "minter")
+            .add_attribute("owner", "owner")
+            .add_attribute("token_id", "alice");
         assert_eq!(received_response, expected_response);
-        assert!(NAME_RESOLVER.has(mocked_deps_mut.as_ref().storage, name.as_bytes()));
-        let stored = NAME_RESOLVER.load(mocked_deps_mut.as_ref().storage, name.as_bytes());
+        assert!(Cw721EmptyExtensions::default()
+            .config
+            .nft_info
+            .has(mocked_deps_mut.as_ref().storage, name.as_str()));
+        let stored = Cw721EmptyExtensions::default()
+            .config
+            .nft_info
+            .load(mocked_deps_mut.as_ref().storage, name.as_str());
         assert!(stored.is_ok());
-        assert_eq!(stored.unwrap(), NameRecord { owner: owner });
+        assert_eq!(
+            stored.unwrap(),
+            NftInfo {
+                owner: owner,
+                approvals: [].to_vec(),
+                token_uri: None,
+                extension: None,
+            }
+        );
     }
 
     #[test]
@@ -175,36 +160,40 @@ mod tests {
         let name = "alice".to_owned();
         let mocked_addr_value = "addr".to_owned();
         let mocked_addr = Addr::unchecked(mocked_addr_value.clone());
-        let minter = mocked_deps_mut
-            .api
-            .addr_humanize(&CanonicalAddr::from("minter".as_bytes()))
-            .expect("Failed to create minter address");
+        let minter = Addr::unchecked("minter");
         let _ = super::instantiate(
             mocked_deps_mut.as_mut(),
             mocked_env.to_owned(),
-            testing::message_info(&mocked_addr, &[]),
-            InstantiateMsg {
-                minter: minter.to_string(),
-            },
+            testing::mock_info(&mocked_addr.to_string(), &[]),
+            simple_instantiate_msg(minter.to_string()),
         )
         .expect("Failed to instantiate");
-        let mocked_msg_info = testing::message_info(&minter, &[]);
-        let _ = super::execute_register(
+        let mocked_msg_info = testing::mock_info(&minter.to_string(), &[]);
+        let execute_msg = ExecuteMsg::Mint {
+            token_id: name.to_owned(),
+            owner: mocked_addr.to_string(),
+            token_uri: None,
+            extension: None,
+        };
+        let _ = super::execute(
             mocked_deps_mut.as_mut(),
+            mocked_env.to_owned(),
             mocked_msg_info,
-            name.clone(),
-            &mocked_addr,
+            execute_msg,
         )
         .expect("Failed to register alice");
-        let query_msg = QueryMsg::ResolveRecord { name };
+        let query_msg = QueryMsg::OwnerOf {
+            token_id: name,
+            include_expired: None,
+        };
 
         // Act
         let query_result = super::query(mocked_deps_mut.as_ref(), mocked_env, query_msg);
 
         // Assert
         assert!(query_result.is_ok(), "Failed to query alice name");
-        let expected_response = format!(r#"{{"address":"{mocked_addr_value}"}}"#);
-        let expected = Binary::new(expected_response.as_bytes().to_vec());
+        let expected_response = format!(r#"{{"owner":"{mocked_addr_value}","approvals":[]}}"#);
+        let expected = Binary::from(expected_response.as_bytes());
         assert_eq!(query_result.unwrap(), expected);
     }
 }

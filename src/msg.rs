@@ -1,24 +1,8 @@
-use cosmwasm_schema::{cw_serde, QueryResponses};
-use cosmwasm_std::Addr;
+use cosmwasm_std::Empty;
+use cw721::msg::{Cw721ExecuteMsg, Cw721InstantiateMsg, Cw721QueryMsg};
 
-#[cw_serde]
-pub struct InstantiateMsg {
-    pub minter: String,
-}
+pub type InstantiateMsg = Cw721InstantiateMsg<Option<Empty>>;
 
-#[cw_serde]
-pub enum ExecuteMsg {
-    Register { name: String, owner: Addr },
-}
+pub type ExecuteMsg = Cw721ExecuteMsg<Option<Empty>, Option<Empty>, Empty>;
 
-#[cw_serde]
-#[derive(QueryResponses)]
-pub enum QueryMsg {
-    #[returns(ResolveRecordResponse)]
-    ResolveRecord { name: String },
-}
-
-#[cw_serde]
-pub struct ResolveRecordResponse {
-    pub address: Option<String>,
-}
+pub type QueryMsg = Cw721QueryMsg<Option<Empty>, Option<Empty>, Empty>;
