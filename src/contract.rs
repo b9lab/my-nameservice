@@ -1,8 +1,10 @@
 use crate::{
     error::ContractError,
-    msg::{ExecuteMsg, InstantiateMsg, QueryMsg},
+    msg::{ExecuteMsg, ExecuteMsgResponse, InstantiateMsg, QueryMsg},
 };
-use cosmwasm_std::{entry_point, Binary, Deps, DepsMut, Env, MessageInfo, Response};
+use cosmwasm_std::{
+    entry_point, to_json_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response,
+};
 use cw721::{
     extension::Cw721EmptyExtensions,
     traits::{Cw721Execute, Cw721Query},
@@ -23,12 +25,18 @@ pub fn instantiate(
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn execute(
-    deps: DepsMut,
+    mut deps: DepsMut,
     env: Env,
     info: MessageInfo,
     msg: ExecuteMsg,
 ) -> ContractResult {
-    Ok(Cw721EmptyExtensions::default().execute(deps, &env, &info, msg)?)
+    let library = Cw721EmptyExtensions::default();
+    Ok(library
+        .execute(deps.branch(), &env, &info, msg)
+        .inspect(|response| assert_eq!(response.data, None))?
+        .set_data(to_json_binary(&ExecuteMsgResponse {
+            num_tokens: library.query_num_tokens(deps.storage)?.count,
+        })?))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -42,8 +50,8 @@ pub fn query(
 
 #[cfg(test)]
 mod tests {
-    use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
-    use cosmwasm_std::{testing, Addr, Binary, Response};
+    use crate::msg::{ExecuteMsg, ExecuteMsgResponse, InstantiateMsg, QueryMsg};
+    use cosmwasm_std::{testing, to_json_binary, Addr, Binary, Response};
     use cw721::{
         extension::Cw721EmptyExtensions,
         state::{NftInfo, MINTER},
@@ -127,6 +135,10 @@ mod tests {
         assert!(contract_result.is_ok(), "Failed to register alice");
         let received_response = contract_result.unwrap();
         let expected_response = Response::default()
+            .set_data(
+                to_json_binary(&ExecuteMsgResponse { num_tokens: 1 })
+                    .expect("Failed to serialize counter"),
+            )
             .add_attribute("action", "mint")
             .add_attribute("minter", "minter")
             .add_attribute("owner", "owner")

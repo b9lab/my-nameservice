@@ -1,9 +1,9 @@
-use cosmwasm_std::{Addr, Event, StdError, Storage};
+use cosmwasm_std::{to_json_binary, Addr, Event, StdError, Storage};
 use cw721::msg::OwnerOfResponse;
 use cw_multi_test::{App, ContractWrapper, Executor};
 use my_nameservice::{
     contract::{execute, instantiate, query},
-    msg::{ExecuteMsg, InstantiateMsg, QueryMsg},
+    msg::{ExecuteMsg, ExecuteMsgResponse, InstantiateMsg, QueryMsg},
 };
 
 fn instantiate_nameservice(mock_app: &mut App) -> (u64, Addr) {
@@ -64,7 +64,9 @@ fn test_register() {
         .add_attribute("owner", owner_addr_value.to_owned())
         .add_attribute("token_id", name_alice.to_owned());
     received_response.assert_event(&expected_event);
-    assert_eq!(received_response.data, None);
+    assert_eq!(
+        received_response.data,
+        Some(to_json_binary(&ExecuteMsgResponse { num_tokens: 1 }).expect("Failed to serialize counter")));
     // Global storage
     let expected_key_main =
         format!("\0\u{4}wasm\0\u{17}contract_data/contract0\0\u{6}tokens{name_alice}",);
