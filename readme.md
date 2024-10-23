@@ -29,3 +29,4 @@ Branches:
 * [`first-execute-message`](../../tree/first-execute-message), [diff](../../compare/first-unit-test..first-execute-message)
 * [`first-query-message`](../../tree/first-query-message), [diff](../../compare/first-execute-message..first-query-message)
 * [`first-multi-test`](../../tree/first-multi-test), [diff](../../compare/first-query-message..first-multi-test)
+* [`first-event`](../../tree/first-event), [diff](../../compare/first-multi-test..first-event)
